@@ -26,7 +26,9 @@ import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.client.indices.CreateIndexRequest;
 import org.elasticsearch.client.indices.CreateIndexResponse;
 import org.elasticsearch.client.indices.GetIndexRequest;
+import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentType;
@@ -42,10 +44,9 @@ import org.elasticsearch.search.aggregations.bucket.terms.ParsedLongTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.fetch.subphase.FetchSourceContext;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
-import org.elasticsearch.search.sort.FieldSortBuilder;
-import org.elasticsearch.search.sort.SortBuilders;
-import org.elasticsearch.search.sort.SortMode;
+import org.elasticsearch.search.sort.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,10 +55,8 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.math.BigDecimal;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -71,6 +70,47 @@ import java.util.concurrent.TimeUnit;
  * must not 相当于 非 ~ ！=
  * should 相当于 或 | or
  * filter 过滤
+ */
+
+
+/**
+ * {
+ *   "query": {
+ *     "bool": {
+ *       "must": [
+ *         { "range": { "@timestamp": { "gt": "2018-02-08T07:00:00.056000000+00:00","lt": "2018-02-08T08:00:00.056000000+00:00" }  }  }
+ *         ,
+ *         {  "wildcard": { "message": "*cp_geo*"  }  }
+ *         ,
+ *         { "match": { "message": "*type:platform*" } }
+ *       ],
+ *       "must_not": { "match": { "message": "*deviceTypeCode:DTout00000000*" } },
+ *       "should": []
+ *     }
+ *   },
+ *   "from": 0,
+ *   "size": 50,
+ *   "sort": {  "@timestamp": "desc"  },
+ *   "aggs": {}
+ * }
+ *
+ * 1. 查询出包含 log_geo 的数据 “wildcard”: { “message”: “log_geo” }
+ * 此处 log_geo 前面有*表示搜索以log_geo结尾的数据
+ * log_geo后面有* 表示搜以log_geo开始的数据，
+ * log_geo前后都有*就是通用匹配包含log_geo的记录
+ * “wildcard”: { “message”: “log_geo” }
+ * 2. 查询某个时间段的数据
+ * “range”: { “@timestamp”: { “gt”: “2018-02-08T07:00:00.056000000+00:00”,”lt”: “2018-02-08T08:00:00.056000000+00:00” } }
+ * #注意 时区减去8小时
+ * 3. 条件查询与条件排除数据
+ * 3.1 match 包含provider 的数据
+ * { “match”: { “message”: “type:provider” } }
+ * 3.2 must_not 类似于 must 做排除使用
+ * 排除包含 “must_not”: { “match”: { “message”: “dateTime:2018-02-08 15:59” } },
+ * 4. from 表示起始的记录的ID
+ * 5. size 表示显示的记录数
+ * ————————————————
+ *
  */
 @Service
 public class ElasticSearchService {
@@ -133,6 +173,25 @@ public class ElasticSearchService {
         }
         return null;
     }
+
+
+
+
+
+
+//////########################################################################################################################
+
+
+
+
+    /**
+     * 创建索引
+     * @param indexName
+     * @param settings
+     * @param mapping
+     * @return
+     * @throws IOException
+     */
     public CreateIndexResponse createIndex(String indexName, String settings, String mapping) throws IOException{
         CreateIndexRequest request = new CreateIndexRequest(indexName);
 
@@ -151,7 +210,7 @@ public class ElasticSearchService {
      */
     public void delIndex(String indexName){
         try {
-            if (indexExists(indexName)) {
+            if (existsIndex(indexName)) {
                 boolean isDelete = esUtil.deleteIndex(indexName);
             }
         }catch(Exception e){
@@ -164,7 +223,7 @@ public class ElasticSearchService {
      * @return
      * @throws IOException
      */
-    public boolean indexExists(String indexName) throws IOException {
+    public boolean existsIndex(String indexName) throws IOException {
         GetIndexRequest request = new GetIndexRequest(indexName);
         return client.indices().exists(request, RequestOptions.DEFAULT);
     }
@@ -175,9 +234,10 @@ public class ElasticSearchService {
      * @throws Exception
      */
     public ResponseBean  addDoc(User user) throws Exception {
-        if (!indexExists(INDEX_NAME)) {
-            createIndex2(INDEX_NAME);
+        if (!existsIndex(INDEX_NAME)) {
+            createIndex(INDEX_NAME);
         }
+
         IndexRequest request = new IndexRequest(INDEX_NAME);
         request.id(user.getId());    //ID也可使用内部自动生成的 不过希望和数据库统一唯一业务ID
         request.source(JSON.toJSONString(user), XContentType.JSON);
@@ -203,14 +263,31 @@ public class ElasticSearchService {
         request.source(source, XContentType.JSON);
         return client.index(request, RequestOptions.DEFAULT);
     }
-    //查询
-    public Object get(String id) {
+
+    /**
+     * 判断记录是都存在
+     * @param index
+     * @param type
+     * @param userVo
+     * @return
+     * @throws IOException
+     */
+    public boolean exists(String index, String type, User userVo) throws IOException {
+        GetRequest getRequest = new GetRequest(index, type, userVo.getId().toString());
+        getRequest.fetchSourceContext(new FetchSourceContext(false));
+        getRequest.storedFields("_none_");
+        boolean exists = client.exists(getRequest, RequestOptions.DEFAULT);
+        System.out.println("exists: " + exists);
+        return exists;
+    }
+
+    //查询单个文档
+    public Object getDoc(String id) {
         GetRequest getRequest = new GetRequest(INDEX_NAME, id);
        try {
            GetResponse getResponse = client.get(getRequest, RequestOptions.DEFAULT);
            if (getResponse.isExists()) {
                String sourceAsString = getResponse.getSourceAsString();
-               //getResponse.getSource();
                return sourceAsString;
            }
        }catch (Exception e){
@@ -218,6 +295,27 @@ public class ElasticSearchService {
        }
         return null;
     }
+
+    /**
+     * 根据 id 更新指定索引中的文档
+     * @param indexName
+     * @param id
+     * @param updateMap
+     * @return
+     * @throws IOException
+     */
+    public UpdateResponse updateDoc(String indexName, String id, Map<String,Object> updateMap) throws IOException{
+        UpdateRequest request = new UpdateRequest(indexName, id);
+        request.doc(updateMap);
+        return client.update(request, RequestOptions.DEFAULT);
+    }
+    public UpdateResponse updateDoc(String indexName, String id, User userVo) throws IOException{
+        UpdateRequest request = new UpdateRequest(indexName, id);
+        request.doc(JSON.toJSONString(userVo), XContentType.JSON);
+        UpdateResponse updateResponse = client.update(request, RequestOptions.DEFAULT);
+        return updateResponse;
+    }
+
     /**
      * 根据 id 删除指定索引中的文档
      * @param
@@ -234,18 +332,7 @@ public class ElasticSearchService {
 
         }
     }
-    /**
-     * 根据 id 更新指定索引中的文档
-     * @param indexName
-     * @param id
-     * @return
-     * @throws IOException
-     */
-    public UpdateResponse updateDoc(String indexName, String id, Map<String,Object> updateMap) throws IOException{
-        UpdateRequest request = new UpdateRequest(indexName, id);
-        request.doc(updateMap);
-        return client.update(request, RequestOptions.DEFAULT);
-    }
+
 
     public String search(String content) throws IOException {
         //创建检索请求
@@ -500,6 +587,123 @@ public class ElasticSearchService {
                 request.add(new IndexRequest(indexName).id(JSONObject.parseObject(s).getString("id")).source(s, XContentType.JSON));
             }
         }
-        return client.bulk(request, RequestOptions.DEFAULT);
+         BulkResponse bulkAddResponse = client.bulk(request, RequestOptions.DEFAULT);
+
+// 批量更新
+        List<User> testsList = new ArrayList<>();
+
+        BulkRequest bulkUpdateRequest = new BulkRequest();
+        for (int i = 0; i < testsList.size(); i++) {
+            User user = testsList.get(i);
+            user.setName(user.getName() + " updated");
+            UpdateRequest updateRequest = new UpdateRequest(INDEX_NAME, user.getId().toString());
+            updateRequest.doc(JSON.toJSONString(user), XContentType.JSON);
+            bulkUpdateRequest.add(updateRequest);
+        }
+        BulkResponse bulkUpdateResponse = client.bulk(bulkUpdateRequest, RequestOptions.DEFAULT);
+        System.out.println("bulkUpdate: " + JSON.toJSONString(bulkUpdateResponse));
+        search(INDEX_NAME, "updated");
+
+
+// 批量删除
+        BulkRequest bulkDeleteRequest = new BulkRequest();
+        for (int i = 0; i < testsList.size(); i++) {
+            User user = testsList.get(i);
+            DeleteRequest deleteRequest = new DeleteRequest(INDEX_NAME, user.getId().toString());
+            bulkDeleteRequest.add(deleteRequest);
+        }
+        BulkResponse bulkDeleteResponse = client.bulk(bulkDeleteRequest, RequestOptions.DEFAULT);
+        System.out.println("bulkDelete: " + JSON.toJSONString(bulkDeleteResponse));
+        search(INDEX_NAME, "this");
+
+         return bulkAddResponse;
     }
+    public void search(String index, String name) throws IOException {
+        BoolQueryBuilder boolBuilder = QueryBuilders.boolQuery();
+        boolBuilder.must(QueryBuilders.matchQuery("name", name)); // 这里可以根据字段进行搜索，must表示符合条件的，相反的mustnot表示不符合条件的
+        // boolBuilder.must(QueryBuilders.matchQuery("id", tests.getId().toString()));
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+        sourceBuilder.query(boolBuilder);
+        sourceBuilder.from(0);
+        sourceBuilder.size(100); // 获取记录数，默认10
+        sourceBuilder.fetchSource(new String[]{"id", "name"}, new String[]{}); // 第一个是获取字段，第二个是过滤的字段，默认获取全部
+        SearchRequest searchRequest = new SearchRequest(index);
+       // searchRequest.types(type);
+        searchRequest.source(sourceBuilder);
+        SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+        System.out.println("search: " + JSON.toJSONString(response));
+        SearchHits hits = response.getHits();
+        SearchHit[] searchHits = hits.getHits();
+        for (SearchHit hit : searchHits) {
+            System.out.println("search -> " + hit.getSourceAsString());
+        }
+
+    }
+
+
+    public void searchAreaByLatAndLon(@RequestParam("token") String token,
+                                           @RequestParam("lat") Double lat,
+                                           @RequestParam("lon") Double lon) throws Exception {
+
+        //设定搜索半径
+
+        GeoDistanceQueryBuilder queryBuilder = QueryBuilders.geoDistanceQuery("location")
+                .point(lat, lon)
+                .distance(1500, DistanceUnit.KILOMETERS)
+                .geoDistance(GeoDistance.PLANE);
+
+        //按距离排序
+        GeoDistanceSortBuilder sort = SortBuilders.geoDistanceSort("location", lat, lon);
+        sort.order(SortOrder.ASC);
+        sort.point(lat, lon);
+        //构建检索
+        SearchSourceBuilder searchSourceBuilder = SearchSourceBuilder.searchSource()
+                .from(0)
+                .size(20)
+                .query(queryBuilder )
+                .sort(sort);
+        //SearchHits searchHits = elasearchService.searchDocument(ElsIndexEnums.rz_area.getIndex(), searchSourceBuilder);
+
+
+        //创建搜索构建者
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); //索引
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+        sourceBuilder.from(0); //设置确定结果要从哪个索引开始搜索的from选项，默认为0
+        sourceBuilder.size(100); //设置确定搜素命中返回数的size选项，默认为10
+        sourceBuilder.timeout(new TimeValue(60, TimeUnit.SECONDS)); //设置一个可选的超时，控制允许搜索的时间。
+        searchRequest.source(sourceBuilder);
+        SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+        SearchHits searchHits = response.getHits();
+
+        ArrayList<Map> arrayList = new ArrayList<Map>();
+
+        {//控制台测试显示！生产删除！
+            searchHits.forEach(hit->{
+                Map map = new HashMap();
+                map.put("complete_path", hit.getSourceAsMap().get("complete_path"));
+                //获取距离值，并保留两位小数点
+                BigDecimal geoDis = new BigDecimal((Double) hit.getSortValues()[0]);
+                //坐标
+                Object location2 = hit.getSourceAsMap().get("location");
+                Map<String, Object> hitMap = hit.getSourceAsMap();
+                //计算距离
+                hitMap.put("geoDistance", geoDis.setScale(0, BigDecimal.ROUND_HALF_DOWN));
+                map.put("range", hit.getSourceAsMap().get("geoDistance"));
+                arrayList.add(map);
+                System.out.println(hit.getSourceAsMap().get("complete_path") + "的坐标：" +
+                        location2 + "与我的距离" +
+                        hit.getSourceAsMap().get("geoDistance") +
+                        DistanceUnit.METERS.toString());
+            });
+        }
+
+        Map<String, Object> map = new HashMap<>();
+        if (searchHits.getHits().length > 0) {
+            map = searchHits.getHits()[0].getSourceAsMap();
+        }
+        //return AppResDto.success(arrayList);
+        //return AppResDto.success(map);
+    }
+
+
 }
