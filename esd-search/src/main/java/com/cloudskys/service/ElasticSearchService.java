@@ -17,8 +17,7 @@ import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.action.search.SearchRequest;
-import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.action.search.*;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RequestOptions;
@@ -36,6 +35,7 @@ import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.*;
 import org.elasticsearch.index.reindex.UpdateByQueryRequest;
 import org.elasticsearch.rest.RestStatus;
+import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.Aggregation;
@@ -361,12 +361,13 @@ public class ElasticSearchService {
         }
 
         if (!StringUtils.isEmpty(content)){
-            //自定义组合查询
+            //自定义组合查询  boost是设置权重 /查询结果status为4的会被优先展示其次coutent，再次fields_timestamp
             BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
-            TermQueryBuilder termQuery = QueryBuilders.termQuery("status", 4);
-            //WildcardQueryBuilder termQuery1 = QueryBuilders.wildcardQuery("status", "4");
+            TermQueryBuilder termQuery = QueryBuilders.termQuery("status", 4).boost(8);
+            //wildcard通配符查询 性能较差不建议使用 ?：任意字符
+            // WildcardQueryBuilder termQuery1 = QueryBuilders.wildcardQuery("appli_name", "1?3");
             MatchQueryBuilder queryBuilder = QueryBuilders.matchQuery("coutent",content)
-                    .fuzziness(Fuzziness.AUTO); //模糊匹配
+                    .fuzziness(Fuzziness.AUTO).boost(1); //模糊匹配
             boolQueryBuilder.must(termQuery).must(queryBuilder).must(rangeQueryBuilder).must(matchQueryBuilder);
                     //.must(termQuery1);
             sourceBuilder.query(boolQueryBuilder);
@@ -718,5 +719,110 @@ public class ElasticSearchService {
         //return AppResDto.success(map);
     }
 
+
+    public String searchBigAll(String content) throws IOException {
+        //创建检索请求
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); //索引
+
+
+        //创建搜索构建者
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+
+        //BoolQueryBuilder boolBuilder = QueryBuilders.boolQuery();
+
+        MatchQueryBuilder matchQueryBuilder = QueryBuilders.matchQuery("fields.entity_id", "319");//这里可以根据字段进行搜索，must表示符合条件的，相反的mustnot表示不符合条件的
+        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("fields_timestamp"); //新建range条件
+        rangeQueryBuilder.gte("2019-03-21T08:24:37.873Z"); //开始时间
+        rangeQueryBuilder.lte("2019-03-21T08:24:37.873Z"); //结束时间
+        //boolBuilder.must(rangeQueryBuilder);
+        //boolBuilder.must(matchQueryBuilder);
+        //sourceBuilder.query(boolBuilder); //设置查询，可以是任何类型的QueryBuilder。
+
+
+        String[] includeFields = new String[] {"fields.port","fields.entity_id","fields.message"};
+        String[] excludeFields =  new String[] {""};
+        if (!CollectionUtils.isEmpty(includeFields) || !CollectionUtils.isEmpty(excludeFields)) {
+            sourceBuilder.fetchSource(includeFields, excludeFields); //返回和排除列 第一个是获取字段，第二个是过滤的字段，默认获取全部
+        }
+
+        if (!StringUtils.isEmpty(content)){
+            //自定义组合查询  boost是设置权重 /查询结果status为4的会被优先展示其次coutent，再次fields_timestamp
+            BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+            TermQueryBuilder termQuery = QueryBuilders.termQuery("status", 4).boost(8);
+            //wildcard通配符查询 性能较差不建议使用 ?：任意字符
+            // WildcardQueryBuilder termQuery1 = QueryBuilders.wildcardQuery("appli_name", "1?3");
+            MatchQueryBuilder queryBuilder = QueryBuilders.matchQuery("coutent",content)
+                    .fuzziness(Fuzziness.AUTO).boost(1); //模糊匹配
+            boolQueryBuilder.must(termQuery).must(queryBuilder).must(rangeQueryBuilder).must(matchQueryBuilder);
+            //.must(termQuery1);
+            sourceBuilder.query(boolQueryBuilder);
+        }
+        sourceBuilder.from(0); //设置确定结果要从哪个索引开始搜索的from选项，默认为0
+        sourceBuilder.size(100); //设置确定搜素命中返回数的size选项，默认为10
+        sourceBuilder.timeout(new TimeValue(60, TimeUnit.SECONDS)); //设置一个可选的超时，控制允许搜索的时间。
+        sourceBuilder.sort(new FieldSortBuilder("id").order(SortOrder.ASC)); //根据自己的需求排序
+        // 排序
+        //FieldSortBuilder fsb = SortBuilders.fieldSort("date");
+        //fsb.order(SortOrder.DESC);
+        //sourceBuilder.sort(fsb);
+
+        searchRequest.source(sourceBuilder);
+        SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+        SearchHits hits = response.getHits();  //SearchHits提供有关所有匹配的全局信息，例如总命中数或最高分数：
+        SearchHit[] searchHits = hits.getHits();
+        // List<User> list = Arrays.stream(response.getHits().getHits()).map(this::toHig).collect(Collectors.toList());
+        for (SearchHit hit : searchHits) {
+            log.info("search -> {}",hit.getSourceAsString());
+        }
+        return Arrays.toString(searchHits);
+    }
+
+    /**
+     * 大量数据查询
+     * @param lastTime
+     * @param nowTime
+     * @param scrollTimeOut
+     * @return
+     * @throws IOException
+     */
+    public  List<SearchHit> scrollSearchAll(long lastTime,long nowTime,Long scrollTimeOut) throws IOException {
+        //设定滚动时间间隔,60秒,不是处理查询结果的所有文档的所需时间
+        //游标查询的过期时间会在每次做查询的时候刷新，所以这个时间只需要足够处理当前批的结果就可以了
+        final  Scroll scroll = new Scroll(TimeValue.timeValueSeconds(scrollTimeOut));
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
+        searchRequest.scroll(scroll);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        QueryBuilder queryBuilder = QueryBuilders.boolQuery().must(QueryBuilders.rangeQuery("intercept_time").gte(lastTime).lte(nowTime));
+        searchSourceBuilder.query(queryBuilder);
+        searchRequest.source(searchSourceBuilder);
+        SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
+        String scrollId;
+
+
+        List<SearchHit> resultSearchHit = new ArrayList<SearchHit>();
+        do {
+            for (SearchHit hit : searchResponse.getHits().getHits()) {
+                Map<String, Object> sourceAsMap = hit.getSourceAsMap();
+                //获取需要数据
+                resultSearchHit.add(hit);
+            }
+            //每次循环完后取得scrollId,用于记录下次将从这个游标开始取数
+            scrollId = searchResponse.getScrollId();
+            SearchScrollRequest scrollRequest = new SearchScrollRequest(scrollId);
+            scrollRequest.scroll(scroll);
+            try {
+                //进行下次查询
+                searchResponse = client.scroll(scrollRequest, RequestOptions.DEFAULT);
+            } catch (IOException e) {
+                log.error("获取数据错误2 ->", e);
+            }
+        } while (searchResponse.getHits().getHits().length != 0);
+        //及时清除es快照，释放资源
+        ClearScrollRequest clearScrollRequest = new ClearScrollRequest();
+        //也可以选择setScrollIds()将多个scrollId一起使用
+        clearScrollRequest.addScrollId(scrollId);
+        client.clearScroll(clearScrollRequest,RequestOptions.DEFAULT);
+        return resultSearchHit;
+    }
 
 }
