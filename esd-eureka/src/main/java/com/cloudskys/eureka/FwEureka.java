@@ -1,4 +1,4 @@
-package com.yisu.eureka;
+package com.cloudskys.eureka;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

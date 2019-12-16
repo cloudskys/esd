@@ -1,4 +1,4 @@
-package com.yisu.boot.configure;
+package com.cloudskys.boot.configure;
 
 import de.codecentric.boot.admin.server.config.AdminServerProperties;
 import org.springframework.context.annotation.Configuration;

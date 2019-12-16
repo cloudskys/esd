@@ -1,4 +1,4 @@
-package com.yisu.service;
+package com.cloudskys.service;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

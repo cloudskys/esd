@@ -1,4 +1,4 @@
-package com.yisu.boot;
+package com.cloudskys.boot;
 
 import de.codecentric.boot.admin.server.config.EnableAdminServer;
 import org.springframework.boot.SpringApplication;
