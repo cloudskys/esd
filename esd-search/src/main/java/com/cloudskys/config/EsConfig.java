@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
+import org.springframework.util.Assert;
 
 import java.util.ArrayList;
 
@@ -45,6 +46,7 @@ public class EsConfig {
     @Bean(destroyMethod = "close")//这个close是调用RestHighLevelClient中的close
     @Scope("singleton")
     public RestHighLevelClient client() {
+        Assert.isNull(this.hosts, "无效的es连接");
         if(StringUtils.isEmpty(host)){
             host = hosts;
         }

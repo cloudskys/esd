@@ -31,6 +31,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.*;
 import org.elasticsearch.index.reindex.UpdateByQueryRequest;
@@ -345,27 +346,39 @@ public class ElasticSearchService {
         //BoolQueryBuilder boolBuilder = QueryBuilders.boolQuery();
 
         MatchQueryBuilder matchQueryBuilder = QueryBuilders.matchQuery("fields.entity_id", "319");//这里可以根据字段进行搜索，must表示符合条件的，相反的mustnot表示不符合条件的
-        // RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("fields_timestamp"); //新建range条件
-        // rangeQueryBuilder.gte("2019-03-21T08:24:37.873Z"); //开始时间
-        // rangeQueryBuilder.lte("2019-03-21T08:24:37.873Z"); //结束时间
-        // boolBuilder.must(rangeQueryBuilder);
+         RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("fields_timestamp"); //新建range条件
+         rangeQueryBuilder.gte("2019-03-21T08:24:37.873Z"); //开始时间
+         rangeQueryBuilder.lte("2019-03-21T08:24:37.873Z"); //结束时间
+         //boolBuilder.must(rangeQueryBuilder);
         //boolBuilder.must(matchQueryBuilder);
         //sourceBuilder.query(boolBuilder); //设置查询，可以是任何类型的QueryBuilder。
-        sourceBuilder.from(0); //设置确定结果要从哪个索引开始搜索的from选项，默认为0
-        sourceBuilder.size(100); //设置确定搜素命中返回数的size选项，默认为10
-        sourceBuilder.timeout(new TimeValue(60, TimeUnit.SECONDS)); //设置一个可选的超时，控制允许搜索的时间。
-        // sourceBuilder.sort(new FieldSortBuilder("id").order(SortOrder.ASC)); //根据自己的需求排序
 
-        sourceBuilder.fetchSource(new String[] {"fields.port","fields.entity_id","fields.message"}, new String[] {}); //第一个是获取字段，第二个是过滤的字段，默认获取全部
+
+        String[] includeFields = new String[] {"fields.port","fields.entity_id","fields.message"};
+        String[] excludeFields =  new String[] {""};
+        if (!CollectionUtils.isEmpty(includeFields) || !CollectionUtils.isEmpty(excludeFields)) {
+            sourceBuilder.fetchSource(includeFields, excludeFields); //返回和排除列 第一个是获取字段，第二个是过滤的字段，默认获取全部
+        }
+
         if (!StringUtils.isEmpty(content)){
             //自定义组合查询
             BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
             TermQueryBuilder termQuery = QueryBuilders.termQuery("status", 4);
+            //WildcardQueryBuilder termQuery1 = QueryBuilders.wildcardQuery("status", "4");
             MatchQueryBuilder queryBuilder = QueryBuilders.matchQuery("coutent",content)
                     .fuzziness(Fuzziness.AUTO); //模糊匹配
-            boolQueryBuilder.must(termQuery).must(queryBuilder);
+            boolQueryBuilder.must(termQuery).must(queryBuilder).must(rangeQueryBuilder).must(matchQueryBuilder);
+                    //.must(termQuery1);
             sourceBuilder.query(boolQueryBuilder);
         }
+        sourceBuilder.from(0); //设置确定结果要从哪个索引开始搜索的from选项，默认为0
+        sourceBuilder.size(100); //设置确定搜素命中返回数的size选项，默认为10
+        sourceBuilder.timeout(new TimeValue(60, TimeUnit.SECONDS)); //设置一个可选的超时，控制允许搜索的时间。
+        sourceBuilder.sort(new FieldSortBuilder("id").order(SortOrder.ASC)); //根据自己的需求排序
+        // 排序
+        //FieldSortBuilder fsb = SortBuilders.fieldSort("date");
+        //fsb.order(SortOrder.DESC);
+        //sourceBuilder.sort(fsb);
 
         searchRequest.source(sourceBuilder);
         SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
