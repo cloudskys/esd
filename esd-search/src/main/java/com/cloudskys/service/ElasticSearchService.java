@@ -6,6 +6,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.cloudskys.domain.ResponseBean;
 import com.cloudskys.domain.User;
 import com.cloudskys.untils.EsUtil;
+import com.cloudskys.untils.JsonUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.admin.indices.alias.Alias;
@@ -17,7 +18,10 @@ import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.search.ClearScrollRequest;
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.action.search.SearchScrollRequest;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RequestOptions;
@@ -39,11 +43,17 @@ import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.Aggregation;
+import org.elasticsearch.search.aggregations.AggregationBuilder;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.Aggregations;
 import org.elasticsearch.search.aggregations.bucket.terms.ParsedLongTerms;
+import org.elasticsearch.search.aggregations.bucket.terms.ParsedStringTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.ParsedAvg;
+import org.elasticsearch.search.aggregations.metrics.ParsedSum;
+import org.elasticsearch.search.aggregations.metrics.ParsedValueCount;
+import org.elasticsearch.search.aggregations.metrics.ValueCountAggregationBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.fetch.subphase.FetchSourceContext;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
@@ -295,6 +305,27 @@ public class ElasticSearchService {
 
        }
         return null;
+    }
+
+    //查询单个文档
+    public List<User> getAllDoc() {
+        List<User> users=null;
+        try {
+            SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+            QueryBuilder queryBuilder = QueryBuilders.matchAllQuery();
+            searchSourceBuilder.query(queryBuilder);
+            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+            SearchHit[] hits = response.getHits().getHits();
+            users = new ArrayList<>();
+            for (SearchHit user : hits) {
+                User userVo = JsonUtil.getObject(user.getSourceAsString(), User.class);
+                users.add(userVo);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return users;
     }
 
     /**
@@ -825,4 +856,110 @@ public class ElasticSearchService {
         return resultSearchHit;
     }
 
+
+    /**
+     * 统计姓名为张三的 平均年龄
+     * select avg(age) age from user where name=张三
+     *
+     * @return List<User>
+     */
+    public long countAge(String name) {
+        try {
+            SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+            QueryBuilder names = QueryBuilders.termQuery("name", name);
+            AggregationBuilder avgAge = AggregationBuilders.avg("avg_age").field("age");
+            searchSourceBuilder.aggregation(avgAge);
+            searchSourceBuilder.query(names);
+            searchSourceBuilder.size(0);
+            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchResponse response = client.search(searchRequest,RequestOptions.DEFAULT);
+            ParsedAvg avgAggregationBuilder = response.getAggregations().get("avg_age");
+            return (long) avgAggregationBuilder.value();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
+
+    /**
+     * 统计姓名为张三的 年龄总和
+     * select sum(age) age from user where name=张三
+     *
+     * @return List<User>
+     */
+    public long sumAge(String name) {
+        try {
+            SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+            QueryBuilder names = QueryBuilders.termQuery("name", name);
+            AggregationBuilder sumAge = AggregationBuilders.sum("total_sum").field("age");
+            searchSourceBuilder.aggregation(sumAge);
+            searchSourceBuilder.query(names);
+            searchSourceBuilder.size(0);
+            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchResponse response = client.search(searchRequest,RequestOptions.DEFAULT);
+            ParsedSum.SingleValue avgAggregationBuilder = response.getAggregations().get("avg_age");
+            return (long) avgAggregationBuilder.value();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
+    /**
+     * 求出最小值
+     * select min(*)
+     *
+     * @param field
+     * @return
+     */
+    private AggregationBuilder min(String field) {
+        return AggregationBuilders.min("min").field(field);
+    }
+    /**
+     * 求出最大值
+     * select min(*)
+     *
+     * @param field
+     * @return
+     */
+    private AggregationBuilder max(String field) {
+        return AggregationBuilders.max("max").field(field);
+    }
+    /**
+     * count统计个数
+     *
+     * @param field
+     * @return
+     */
+    private ValueCountAggregationBuilder count(String field) {
+        return AggregationBuilders.count("count_name").field(field);
+
+    }
+
+    /**
+     * 分组查询 AggregationBuilders.terms("分组之后的名称").field("要分组的名称");
+     */
+    public void teram() {
+        try {
+            SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+            //根据姓名进行分组统计个数
+            TermsAggregationBuilder field = AggregationBuilders.terms("terms_name").field("name");
+            ValueCountAggregationBuilder countField = AggregationBuilders.count("count_name").field("name");
+            field.subAggregation(countField);
+            searchSourceBuilder.aggregation(field);
+            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchResponse response = client.search(searchRequest,RequestOptions.DEFAULT);
+            //分组在es中是分桶
+            ParsedStringTerms termsName = response.getAggregations().get("terms_name");
+            List<? extends Terms.Bucket> buckets = termsName.getBuckets();
+            buckets.forEach(naem -> {
+                String key = (String) naem.getKey();
+                ParsedValueCount countName = naem.getAggregations().get("count_name");
+                double value = countName.value();
+                log.info("name , count {} {}", key, value);
+            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
 }
