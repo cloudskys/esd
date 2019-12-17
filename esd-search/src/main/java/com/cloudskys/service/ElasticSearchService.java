@@ -72,7 +72,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * QueryBuilders.termQuery("key", obj) 完全匹配
- * QueryBuilders.termsQuery("key", obj1, obj2..)   一次匹配多个值
+ * QueryBuilders.termsQuery("key", obj1, obj2..)   一次匹配多个值 terms 用法，类似于数据库的 in
  * QueryBuilders.matchQuery("key", Obj) 单个匹配, field不支持通配符, 前缀具高级特性
  * QueryBuilders.multiMatchQuery("text", "field1", "field2"..);  匹配多个字段, field有通配符忒行
  * QueryBuilders.matchAllQuery();         匹配所有文件
@@ -376,15 +376,15 @@ public class ElasticSearchService {
 
         //BoolQueryBuilder boolBuilder = QueryBuilders.boolQuery();
 
-        MatchQueryBuilder matchQueryBuilder = QueryBuilders.matchQuery("fields.entity_id", "319");//这里可以根据字段进行搜索，must表示符合条件的，相反的mustnot表示不符合条件的
+        MatchQueryBuilder matchQueryBuilder = QueryBuilders.matchQuery("fields.entity_name", "java 程序员 书 推荐");//这里可以根据字段进行搜索，must表示符合条件的，相反的mustnot表示不符合条件的
          RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("fields_timestamp"); //新建range条件
          rangeQueryBuilder.gte("2019-03-21T08:24:37.873Z"); //开始时间
          rangeQueryBuilder.lte("2019-03-21T08:24:37.873Z"); //结束时间
          //boolBuilder.must(rangeQueryBuilder);
         //boolBuilder.must(matchQueryBuilder);
         //sourceBuilder.query(boolBuilder); //设置查询，可以是任何类型的QueryBuilder。
-
-
+        matchQueryBuilder.minimumShouldMatch("50%");//java 程序员 书 推荐，这里就有 4 个词，假如要求 50% 命中其中两个词就返回
+        //matchQueryBuilder.operator(Operator.AND); //与match 本身的or意义相反
         String[] includeFields = new String[] {"fields.port","fields.entity_id","fields.message"};
         String[] excludeFields =  new String[] {""};
         if (!CollectionUtils.isEmpty(includeFields) || !CollectionUtils.isEmpty(excludeFields)) {
@@ -595,8 +595,10 @@ public class ElasticSearchService {
             highlightBuilder.field(makeHighlightContent(field));
         }
         BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
-        //自定义条件
+        //自定义条件    multi_match 跨多个 field 查询，表示查询分词在任意一个字段中 也算匹配的结果。
         boolQueryBuilder.should(QueryBuilders.multiMatchQuery(content, fields).fuzziness(Fuzziness.AUTO));
+        //match_phrase  不分词
+        //QueryBuilders.multiMatchQuery(content, fields).operator(Operator.AND);//multi_match 跨多个 field 查询，表示查询分词必须出现在相同字段中。
         boolQueryBuilder.should(QueryBuilders.wildcardQuery("account", "*" + content + "*"));
         boolQueryBuilder.should(QueryBuilders.wildcardQuery("name", "*" + content + "*"));
         return searchDocument(highlightBuilder, boolQueryBuilder , from , size);
@@ -663,9 +665,65 @@ public class ElasticSearchService {
 
          return bulkAddResponse;
     }
+
+    /**
+     * match + match_phrase + slop 组合查询，使查询结果更加精准和结果更多
+     * 但是 match_phrase 性能没有 match 好，所以一般需要先用 match 第一步进行过滤，然后在用 match_phrase 进行进一步匹配，并且重新打分，这里又用到了：rescore，window_size 表示对前 10 个进行重新打分
+     GET /product_index/product/_search
+     {
+     "query": {
+     "bool": {
+     "must": {
+     "match": {
+     "product_name": {
+     "query": "PHILIPS HX6730"
+     }
+     }
+     },
+     "should": {
+     "match_phrase": {
+     "product_name": {
+     "query": "PHILIPS HX6730",
+     "slop": 10
+     }
+     }
+     }
+     }
+     }
+     }
+
+     GET /product_index/product/_search
+     {
+     "query": {
+     "match": {
+     "product_name": "PHILIPS HX6730"
+     }
+     },
+     "rescore": {
+     "window_size": 10,
+     "query": {
+     "rescore_query": {
+     "match_phrase": {
+     "product_name": {
+     "query": "PHILIPS HX6730",
+     "slop": 10
+     }
+     }
+     }
+     }
+     }
+     }
+     原文链接：https://blog.csdn.net/jiaminbao/article/details/80105636
+     * @param index
+     * @param name
+     * @throws IOException
+     */
     public void search(String index, String name) throws IOException {
         BoolQueryBuilder boolBuilder = QueryBuilders.boolQuery();
         boolBuilder.must(QueryBuilders.matchQuery("name", name)); // 这里可以根据字段进行搜索，must表示符合条件的，相反的mustnot表示不符合条件的
+        //slop = 2 表示中间如果间隔 2 个单词以内也算是匹配的结果
+        // 其实也不能称作间隔，应该说是移位，查询的关键字分词后移动多少位可以跟 doc 内容匹配，移动的次数就是 slop。所以 HX6730 PHILIPS 其实也是可以匹配到 doc 的
+        // QueryBuilders.matchPhraseQuery("name", name).slop(2);
         // boolBuilder.must(QueryBuilders.matchQuery("id", tests.getId().toString()));
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         sourceBuilder.query(boolBuilder);
