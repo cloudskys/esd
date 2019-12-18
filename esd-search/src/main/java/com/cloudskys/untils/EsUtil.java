@@ -1,23 +1,33 @@
 package com.cloudskys.untils;
 
 
+import com.alibaba.fastjson.JSON;
+import com.cloudskys.domain.UserLocationVo;
 import com.cloudskys.service.ElasticSearchService;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.client.indices.GetIndexRequest;
+import org.elasticsearch.common.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
 
 @Component
 public class EsUtil {
     private static final Logger log = LoggerFactory.getLogger(ElasticSearchService.class);
-
+    private static final String INDEX_NAME = "test";
     @Autowired
     private RestHighLevelClient client;
 
@@ -56,5 +66,39 @@ public class EsUtil {
             e.printStackTrace();
         }
         return acknowledged;
+    }
+
+    public  Integer addIndexData() throws Exception {
+        // Client client = new PreBuiltTransportClient(Settings.EMPTY).addTransportAddress(new InetSocketTransportAddress(InetAddress.getByName("localhost"), 9300));
+        List<String> cityList = new ArrayList<String>();
+
+        double lat = 39.929986;
+        double lon = 116.395645;
+        for (int i = 100000; i < 1000000; i++) {
+            double max = 0.00001;
+            double min = 0.000001;
+            Random random = new Random();
+            double s = random.nextDouble() % (max - min + 1) + max;
+            DecimalFormat df = new DecimalFormat("######0.000000");
+            // System.out.println(s);
+            String lons = df.format(s + lon);
+            String lats = df.format(s + lat);
+            Double dlon = Double.valueOf(lons);
+            Double dlat = Double.valueOf(lats);
+
+            UserLocationVo city1 = new UserLocationVo(i, "郭德纲"+i, dlat, dlon);
+            cityList.add(JSON.toJSONString(city1));
+        }
+
+        BulkRequest request = new BulkRequest();
+        for (int i = 0;i<cityList.size();i++){
+            request.add(new IndexRequest(INDEX_NAME).source(cityList.get(i), XContentType.JSON));
+        }
+
+        BulkResponse bulkAddResponse = client.bulk(request, RequestOptions.DEFAULT);
+        if (bulkAddResponse.hasFailures()) {
+            System.out.println("批量创建索引错误！");
+        }
+        return null;
     }
 }

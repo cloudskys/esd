@@ -3,6 +3,7 @@ package com.cloudskys.service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.cloudskys.domain.NID;
 import com.cloudskys.domain.ResponseBean;
 import com.cloudskys.domain.User;
 import com.cloudskys.untils.EsUtil;
@@ -18,10 +19,7 @@ import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.action.search.ClearScrollRequest;
-import org.elasticsearch.action.search.SearchRequest;
-import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.action.search.SearchScrollRequest;
+import org.elasticsearch.action.search.*;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RequestOptions;
@@ -65,6 +63,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import org.springframework.web.bind.annotation.RequestParam;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.*;
@@ -284,7 +285,7 @@ public class ElasticSearchService {
      * @throws IOException
      */
     public boolean exists(String index, String type, User userVo) throws IOException {
-        GetRequest getRequest = new GetRequest(index, type, userVo.getId().toString());
+        GetRequest getRequest = new GetRequest(index, userVo.getId().toString());
         getRequest.fetchSourceContext(new FetchSourceContext(false));
         getRequest.storedFields("_none_");
         boolean exists = client.exists(getRequest, RequestOptions.DEFAULT);
@@ -883,6 +884,8 @@ public class ElasticSearchService {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         QueryBuilder queryBuilder = QueryBuilders.boolQuery().must(QueryBuilders.rangeQuery("intercept_time").gte(lastTime).lte(nowTime));
         searchSourceBuilder.query(queryBuilder);
+        searchSourceBuilder.size(5000); //设定每次返回多少条数据
+        searchSourceBuilder.fetchSource(new String[]{"nid"},null);//设置返回字段和排除字段
         searchRequest.source(searchSourceBuilder);
         SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
         String scrollId;
@@ -913,7 +916,86 @@ public class ElasticSearchService {
         client.clearScroll(clearScrollRequest,RequestOptions.DEFAULT);
         return resultSearchHit;
     }
+    public void testScroll() {
+        // 初始化scroll
+        // 设定滚动时间间隔
+        // 这个时间并不需要长到可以处理所有的数据，仅仅需要足够长来处理前一批次的结果。每个 scroll 请求（包含 scroll 参数）设置了一个新的失效时间。
+        final Scroll scroll = new Scroll(TimeValue.timeValueMinutes(1L));//设定滚动时间间隔
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); // 新建索引搜索请求
+        searchRequest.scroll(scroll);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        QueryBuilder queryBuilder = QueryBuilders.boolQuery().must(QueryBuilders.rangeQuery("intercept_time").gte("2019-12-01").lte("2019-12-20"));
 
+        searchSourceBuilder.query(queryBuilder);
+        searchSourceBuilder.size(5000); //设定每次返回多少条数据
+        searchSourceBuilder.fetchSource(new String[]{"nid"},null);//设置返回字段和排除字段
+        searchRequest.source(searchSourceBuilder);
+
+        SearchResponse searchResponse = null;
+        try {
+            searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        int page = 0 ;
+        File outFile = new File("E://cater_nid.csv");//写出的CSV文件
+        try {
+            BufferedWriter writer = new BufferedWriter(new FileWriter(outFile));
+
+            SearchHit[] searchHits = searchResponse.getHits().getHits();
+            page++;
+            System.out.println("-----第"+ page +"页-----");
+            for (SearchHit searchHit : searchHits) {
+                //System.out.println(searchHit.getSourceAsString());
+                String sourceAsString = searchHit.getSourceAsString();
+                NID t = JSON.parseObject(sourceAsString, NID.class);
+                writer.write(t.getNid());
+                writer.newLine();
+            }
+
+            //遍历搜索命中的数据，直到没有数据
+            String scrollId = searchResponse.getScrollId();
+            while (searchHits != null && searchHits.length > 0) {
+                SearchScrollRequest scrollRequest = new SearchScrollRequest(scrollId);
+                scrollRequest.scroll(scroll);
+                try {
+                    searchResponse = client.scroll(scrollRequest, RequestOptions.DEFAULT);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                scrollId = searchResponse.getScrollId();
+                searchHits = searchResponse.getHits().getHits();
+                if (searchHits != null && searchHits.length > 0) {
+                    System.out.println("-----下一页-----");
+                    page++;
+                    System.out.println("-----第"+ page +"页-----");
+                    for (SearchHit searchHit : searchHits) {
+                        //System.out.println(searchHit.getSourceAsString());
+                        String sourceAsString = searchHit.getSourceAsString();
+                        NID t = JSON.parseObject(sourceAsString, NID.class);
+                        writer.write(t.getNid());
+                        writer.newLine();
+                    }
+                }
+            }
+            //清除滚屏
+            ClearScrollRequest clearScrollRequest = new ClearScrollRequest();
+            clearScrollRequest.addScrollId(scrollId);//也可以选择setScrollIds()将多个scrollId一起使用
+            ClearScrollResponse clearScrollResponse = null;
+            try {
+                clearScrollResponse = client.clearScroll(clearScrollRequest, RequestOptions.DEFAULT);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            boolean succeeded = clearScrollResponse.isSucceeded();
+            System.out.println("succeeded:" + succeeded);
+
+            writer.close();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     /**
      * 统计姓名为张三的 平均年龄
@@ -1017,6 +1099,55 @@ public class ElasticSearchService {
             });
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+
+    }
+
+
+
+
+    /**
+     *  获取附近的人
+     * @param lat 纬度
+     * @param lon 经度
+     * 于谦的坐标，查询距离王小丽1米到1000米的所有人
+     * @throws IOException
+     */
+    public  void testGetNearbyPeople(double lat, double lon) throws Exception  {
+        //lat = 39.929986;
+        //lon = 116.395645;
+        //初始化数据
+        esUtil.addIndexData();
+
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+        searchSourceBuilder.from(0).size(1000);//1000人
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+
+//        FilterBuilder builder = geoDistanceRangeFilter("location").point(lon, lat).from("1m").to("100m").optimizeBbox("memory").geoDistance(GeoDistance.PLANE);
+        GeoDistanceQueryBuilder location1 = QueryBuilders.geoDistanceQuery("location").point(lat,lon).distance(80,DistanceUnit.METERS);
+        searchSourceBuilder.postFilter(location1);
+        // 获取距离多少公里 这个才是获取点与点之间的距离的
+        GeoDistanceSortBuilder sort = SortBuilders.geoDistanceSort("location",lat,lon);
+        sort.unit(DistanceUnit.METERS);
+        sort.order(SortOrder.ASC);
+        sort.point(lat,lon);
+        searchSourceBuilder.sort(sort);
+        SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+
+        SearchHits hits = response.getHits();
+        SearchHit[] searchHists = hits.getHits();
+        // 搜索耗时
+        long usetime = response.getTook().getMillis()/1000;
+        System.out.println("王小丽附近的人(" + hits.getTotalHits() + "个)，耗时("+usetime+"秒)：");
+        for (SearchHit hit : searchHists) {
+            String name = (String)hit.getSourceAsMap().get("name");
+            List<Double> location = (List<Double>)hit.getSourceAsMap().get("location");
+            // 获取距离值，并保留两位小数点
+            BigDecimal geoDis = new BigDecimal((Double) hit.getSortValues()[0]);
+            Map<String, Object> hitMap = hit.getSourceAsMap();
+            // 在创建MAPPING的时候，属性名的不可为geoDistance。
+            hitMap.put("geoDistance", geoDis.setScale(0, BigDecimal.ROUND_HALF_DOWN));
+            System.out.println(name+"的坐标："+location + "他距离王小丽" + hit.getSourceAsMap().get("geoDistance") + DistanceUnit.METERS.toString());
         }
 
     }
