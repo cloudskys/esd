@@ -2,7 +2,7 @@
 /.factorypath
 /.project
 /.settings/
-/target/*
+/target/
 /.idea/
 .idea/*
 *.iml
