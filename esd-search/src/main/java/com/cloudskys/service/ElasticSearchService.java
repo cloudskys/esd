@@ -6,6 +6,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.cloudskys.domain.NID;
 import com.cloudskys.domain.ResponseBean;
 import com.cloudskys.domain.User;
+import com.cloudskys.untils.EsContants;
 import com.cloudskys.untils.EsUtil;
 import com.cloudskys.untils.JsonUtil;
 import org.apache.commons.lang3.StringUtils;
@@ -127,7 +128,6 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class ElasticSearchService {
     private static final Logger log = LoggerFactory.getLogger(ElasticSearchService.class);
-    private static final String INDEX_NAME = "test";
     @Autowired
     private RestHighLevelClient client;
 
@@ -246,11 +246,11 @@ public class ElasticSearchService {
      * @throws Exception
      */
     public ResponseBean  addDoc(User user) throws Exception {
-        if (!existsIndex(INDEX_NAME)) {
-            createIndex(INDEX_NAME);
+        if (!existsIndex(EsContants.INDEX_NAME)) {
+            createIndex(EsContants.INDEX_NAME);
         }
 
-        IndexRequest request = new IndexRequest(INDEX_NAME);
+        IndexRequest request = new IndexRequest(EsContants.INDEX_NAME);
         request.id(user.getId());    //ID也可使用内部自动生成的 不过希望和数据库统一唯一业务ID
         request.source(JSON.toJSONString(user), XContentType.JSON);
         IndexResponse indexResponse = client.index(request, RequestOptions.DEFAULT);
@@ -295,7 +295,7 @@ public class ElasticSearchService {
 
     //查询单个文档
     public Object getDoc(String id) {
-        GetRequest getRequest = new GetRequest(INDEX_NAME, id);
+        GetRequest getRequest = new GetRequest(EsContants.INDEX_NAME, id);
        try {
            GetResponse getResponse = client.get(getRequest, RequestOptions.DEFAULT);
            if (getResponse.isExists()) {
@@ -315,7 +315,7 @@ public class ElasticSearchService {
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
             QueryBuilder queryBuilder = QueryBuilders.matchAllQuery();
             searchSourceBuilder.query(queryBuilder);
-            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME).source(searchSourceBuilder);
             SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
             SearchHit[] hits = response.getHits().getHits();
             users = new ArrayList<>();
@@ -355,7 +355,7 @@ public class ElasticSearchService {
      * @param id
      */
     public void delete(String id) {
-        DeleteRequest request = new DeleteRequest(INDEX_NAME, id);
+        DeleteRequest request = new DeleteRequest(EsContants.INDEX_NAME, id);
         try {
             DeleteResponse deleteResponse = client.delete(request, RequestOptions.DEFAULT);
             if (deleteResponse.status() == RestStatus.OK) {
@@ -369,7 +369,7 @@ public class ElasticSearchService {
 
     public String search(String content) throws IOException {
         //创建检索请求
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); //索引
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME); //索引
 
 
         //创建搜索构建者
@@ -446,7 +446,7 @@ public class ElasticSearchService {
      * @return
      */
     public ResponseBean testESUpdate(@RequestParam String id, @RequestParam Double money) {
-        UpdateRequest updateRequest = new UpdateRequest(INDEX_NAME, id);
+        UpdateRequest updateRequest = new UpdateRequest(EsContants.INDEX_NAME, id);
         Map<String, Object> map = new HashMap<String, Object>();
         map.put("money", money);
         updateRequest.doc(map);
@@ -473,7 +473,7 @@ public class ElasticSearchService {
      * @return
      */
    public ResponseBean findES(){
-       SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
+       SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME);
        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
 //如果用name直接查询，其实是匹配name分词过后的索引查到的记录(倒排索引)；如果用name.keyword查询则是不分词的查询，正常查询到的记录
        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("birthday").from("1991-01-01").to("2010-10-10").format("yyyy-MM-dd");//范围查询
@@ -511,7 +511,7 @@ public class ElasticSearchService {
      * @return
      */
     public ResponseBean testESFindAgg() {
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME);
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
 
         TermsAggregationBuilder termsAggregationBuilder = AggregationBuilders.terms("by_age").field("age");
@@ -644,25 +644,25 @@ public class ElasticSearchService {
         for (int i = 0; i < testsList.size(); i++) {
             User user = testsList.get(i);
             user.setName(user.getName() + " updated");
-            UpdateRequest updateRequest = new UpdateRequest(INDEX_NAME, user.getId().toString());
+            UpdateRequest updateRequest = new UpdateRequest(EsContants.INDEX_NAME, user.getId().toString());
             updateRequest.doc(JSON.toJSONString(user), XContentType.JSON);
             bulkUpdateRequest.add(updateRequest);
         }
         BulkResponse bulkUpdateResponse = client.bulk(bulkUpdateRequest, RequestOptions.DEFAULT);
         System.out.println("bulkUpdate: " + JSON.toJSONString(bulkUpdateResponse));
-        search(INDEX_NAME, "updated");
+        search(EsContants.INDEX_NAME, "updated");
 
 
 // 批量删除
         BulkRequest bulkDeleteRequest = new BulkRequest();
         for (int i = 0; i < testsList.size(); i++) {
             User user = testsList.get(i);
-            DeleteRequest deleteRequest = new DeleteRequest(INDEX_NAME, user.getId().toString());
+            DeleteRequest deleteRequest = new DeleteRequest(EsContants.INDEX_NAME, user.getId().toString());
             bulkDeleteRequest.add(deleteRequest);
         }
         BulkResponse bulkDeleteResponse = client.bulk(bulkDeleteRequest, RequestOptions.DEFAULT);
         System.out.println("bulkDelete: " + JSON.toJSONString(bulkDeleteResponse));
-        search(INDEX_NAME, "this");
+        search(EsContants.INDEX_NAME, "this");
 
          return bulkAddResponse;
     }
@@ -770,7 +770,7 @@ public class ElasticSearchService {
 
 
         //创建搜索构建者
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); //索引
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME); //索引
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         sourceBuilder.from(0); //设置确定结果要从哪个索引开始搜索的from选项，默认为0
         sourceBuilder.size(100); //设置确定搜素命中返回数的size选项，默认为10
@@ -812,7 +812,7 @@ public class ElasticSearchService {
 
     public String searchBigAll(String content) throws IOException {
         //创建检索请求
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); //索引
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME); //索引
 
 
         //创建搜索构建者
@@ -879,7 +879,7 @@ public class ElasticSearchService {
         //设定滚动时间间隔,60秒,不是处理查询结果的所有文档的所需时间
         //游标查询的过期时间会在每次做查询的时候刷新，所以这个时间只需要足够处理当前批的结果就可以了
         final  Scroll scroll = new Scroll(TimeValue.timeValueSeconds(scrollTimeOut));
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME);
         searchRequest.scroll(scroll);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         QueryBuilder queryBuilder = QueryBuilders.boolQuery().must(QueryBuilders.rangeQuery("intercept_time").gte(lastTime).lte(nowTime));
@@ -921,7 +921,7 @@ public class ElasticSearchService {
         // 设定滚动时间间隔
         // 这个时间并不需要长到可以处理所有的数据，仅仅需要足够长来处理前一批次的结果。每个 scroll 请求（包含 scroll 参数）设置了一个新的失效时间。
         final Scroll scroll = new Scroll(TimeValue.timeValueMinutes(1L));//设定滚动时间间隔
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME); // 新建索引搜索请求
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME); // 新建索引搜索请求
         searchRequest.scroll(scroll);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         QueryBuilder queryBuilder = QueryBuilders.boolQuery().must(QueryBuilders.rangeQuery("intercept_time").gte("2019-12-01").lte("2019-12-20"));
@@ -1011,7 +1011,7 @@ public class ElasticSearchService {
             searchSourceBuilder.aggregation(avgAge);
             searchSourceBuilder.query(names);
             searchSourceBuilder.size(0);
-            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME).source(searchSourceBuilder);
             SearchResponse response = client.search(searchRequest,RequestOptions.DEFAULT);
             ParsedAvg avgAggregationBuilder = response.getAggregations().get("avg_age");
             return (long) avgAggregationBuilder.value();
@@ -1035,7 +1035,7 @@ public class ElasticSearchService {
             searchSourceBuilder.aggregation(sumAge);
             searchSourceBuilder.query(names);
             searchSourceBuilder.size(0);
-            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME).source(searchSourceBuilder);
             SearchResponse response = client.search(searchRequest,RequestOptions.DEFAULT);
             ParsedSum.SingleValue avgAggregationBuilder = response.getAggregations().get("avg_age");
             return (long) avgAggregationBuilder.value();
@@ -1086,7 +1086,7 @@ public class ElasticSearchService {
             ValueCountAggregationBuilder countField = AggregationBuilders.count("count_name").field("name");
             field.subAggregation(countField);
             searchSourceBuilder.aggregation(field);
-            SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+            SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME).source(searchSourceBuilder);
             SearchResponse response = client.search(searchRequest,RequestOptions.DEFAULT);
             //分组在es中是分桶
             ParsedStringTerms termsName = response.getAggregations().get("terms_name");
@@ -1121,7 +1121,7 @@ public class ElasticSearchService {
 
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.from(0).size(1000);//1000人
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME).source(searchSourceBuilder);
+        SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME).source(searchSourceBuilder);
 
 //        FilterBuilder builder = geoDistanceRangeFilter("location").point(lon, lat).from("1m").to("100m").optimizeBbox("memory").geoDistance(GeoDistance.PLANE);
         GeoDistanceQueryBuilder location1 = QueryBuilders.geoDistanceQuery("location").point(lat,lon).distance(80,DistanceUnit.METERS);
