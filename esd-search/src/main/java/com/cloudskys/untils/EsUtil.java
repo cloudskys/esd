@@ -101,4 +101,9 @@ public class EsUtil {
         }
         return null;
     }
+
+    public static void main(String[] args) {
+        String roleName=EnumRoleOperation.ROLE_NORMAL_ADMIN.toString();
+        System.out.println(EnumRoleOperation.valueOf(roleName).op());
+    }
 }

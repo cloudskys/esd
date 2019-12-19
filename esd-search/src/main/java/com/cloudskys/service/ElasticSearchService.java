@@ -641,7 +641,7 @@ public class ElasticSearchService {
         List<User> testsList = new ArrayList<>();
 
         BulkRequest bulkUpdateRequest = new BulkRequest();
-        for (int i = 0; i < testsList.size(); i++) {
+        for (int i = 0, leng=testsList.size(); i < leng; i++) {
             User user = testsList.get(i);
             user.setName(user.getName() + " updated");
             UpdateRequest updateRequest = new UpdateRequest(EsContants.INDEX_NAME, user.getId().toString());
