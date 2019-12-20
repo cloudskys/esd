@@ -34,6 +34,8 @@ import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.CollectionUtils;
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.*;
 import org.elasticsearch.index.reindex.UpdateByQueryRequest;
@@ -187,7 +189,33 @@ public class ElasticSearchService {
     }
 
 
-
+    public ResponseBean createIndexXS() {
+        try {
+            XContentBuilder builder = XContentFactory.jsonBuilder()
+                    .startObject()
+                    .field("properties")
+                    .startObject()
+                    .field("name").startObject().field("index", "true").field("type", "keyword").endObject()
+                    .field("age").startObject().field("index", "true").field("type", "integer").endObject()
+                    .field("money").startObject().field("index", "true").field("type", "double").endObject()
+                    .field("address").startObject().field("index", "true").field("type", "text").field("analyzer", "ik_max_word").endObject()
+                    .field("birthday").startObject().field("index", "true").field("type", "date").field("format", "strict_date_optional_time||epoch_millis").endObject()
+                    .endObject()
+                    .endObject();
+            CreateIndexRequest createIndexRequest = new CreateIndexRequest(EsContants.INDEX_NAME);
+            createIndexRequest.mapping(builder);
+            CreateIndexResponse createIndexResponse = client.indices().create(createIndexRequest, RequestOptions.DEFAULT);
+            boolean acknowledged = createIndexResponse.isAcknowledged();
+            if (acknowledged) {
+                return new ResponseBean(200, "创建成功", null);
+            } else {
+                return new ResponseBean(1002, "创建失败", null);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
 
 
 
