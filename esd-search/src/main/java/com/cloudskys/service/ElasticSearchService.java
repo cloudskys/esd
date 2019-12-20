@@ -220,14 +220,17 @@ public class ElasticSearchService {
      * 删除索引
      * @param indexName
      */
-    public void delIndex(String indexName){
+    public ResponseBean delIndex(String indexName){
         try {
             if (existsIndex(indexName)) {
                 boolean isDelete = esUtil.deleteIndex(indexName);
+                return new ResponseBean(200, "删除成功", null);
             }
         }catch(Exception e){
-
+            return new ResponseBean(1003, "删除异常", null);
         }
+
+        return null;
     }
     /**
      * 判断 index 是否存在
@@ -478,7 +481,7 @@ public class ElasticSearchService {
 //如果用name直接查询，其实是匹配name分词过后的索引查到的记录(倒排索引)；如果用name.keyword查询则是不分词的查询，正常查询到的记录
        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery("birthday").from("1991-01-01").to("2010-10-10").format("yyyy-MM-dd");//范围查询
 //        TermQueryBuilder termQueryBuilder = QueryBuilders.termQuery("name.keyword", name);//精准查询
-       PrefixQueryBuilder prefixQueryBuilder = QueryBuilders.prefixQuery("name.keyword", "张");//前缀查询
+       PrefixQueryBuilder prefixQueryBuilder = QueryBuilders.prefixQuery("name.keyword", "王");//前缀查询
 //        WildcardQueryBuilder wildcardQueryBuilder = QueryBuilders.wildcardQuery("name.keyword", "*三");//通配符查询
 //        FuzzyQueryBuilder fuzzyQueryBuilder = QueryBuilders.fuzzyQuery("name", "三");//模糊查询
        FieldSortBuilder fieldSortBuilder = SortBuilders.fieldSort("age");//按照年龄排序
@@ -510,7 +513,7 @@ public class ElasticSearchService {
      * 聚合查询
      * @return
      */
-    public ResponseBean testESFindAgg() {
+    public ResponseBean testESFindAge() {
         SearchRequest searchRequest = new SearchRequest(EsContants.INDEX_NAME);
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
 

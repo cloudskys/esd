@@ -104,6 +104,7 @@ public class EsUtil {
 
     public static void main(String[] args) {
         String roleName=EnumRoleOperation.ROLE_NORMAL_ADMIN.toString();
-        System.out.println(EnumRoleOperation.valueOf(roleName).op());
+        String name ="";
+        System.out.println(EnumRoleOperation.valueOf(roleName).op(name));
     }
 }
